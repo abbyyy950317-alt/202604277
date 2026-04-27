@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>老師小幫手</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
+    <style>
+        :root {
+            --pink: #ffdae0; --blue: #dcf2f9; --yellow: #fdf5e2;
+            --green: #e2f3e4; --text: #5a5a5a; --white: #ffffff; --accent: #ff9aa2;
+            --correct: #c8e6c9; --wrong: #ffcdd2;
+        }
+
+        body { 
+            cursor: crosshair; overflow-x: hidden;
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; 
+            background: var(--pink); margin: 0; color: var(--text);
+        }
+
+        #p5-canvas-container { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 999; }
+        .sparkle { position: fixed; width: 6px; height: 6px; background: #fff; border-radius: 50%; pointer-events: none; z-index: 1000; box-shadow: 0 0 10px #fff, 0 0 15px var(--accent); opacity: 1; }
+        @keyframes sparkle-fly { 0% { opacity: 1; transform: translate(0, 0) scale(1); } 100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(0); } }
+
+        #app { max-width: 650px; margin: 30px auto; background: var(--white); border-radius: 40px; overflow: hidden; box-shadow: 0 15px 40px rgba(0,0,0,0.08); border: 8px solid var(--white); position: relative; z-index: 10; }
+        header { background: var(--white); text-align: center; padding: 15px 0; font-size: 1.8rem; font-weight: bold; color: var(--accent); letter-spacing: 2px; }
+        
+        nav { display: flex; background: var(--yellow); padding: 8px; gap: 5px; flex-wrap: wrap; }
+        nav button { flex: 1; min-width: 80px; padding: 10px; border: none; background: transparent; cursor: pointer; font-size: 15px; font-weight: bold; color: var(--text); border-radius: 20px; transition: 0.3s; }
+        nav button.active { background: var(--white); color: var(--accent); }
+
+        .content { padding: 25px; min-height: 450px; }
+        h2 { font-size: 1.3rem; color: var(--accent); margin-top: 0; display: flex; justify-content: space-between; }
+
+        /* 抽籤 & 共通 */
+        .picker-box { background: var(--blue); padding: 30px; border-radius: 30px; font-size: 2.5rem; margin-bottom: 20px; text-align: center; min-height: 60px; display: flex; align-items: center; justify-content: center; }
+        textarea { width: 100%; height: 100px; border: 2px solid var(--blue); border-radius: 20px; padding: 12px; font-size: 1rem; margin-bottom: 10px; resize: none; }
+        
+        /* 計分 */
+        .team-row { background: var(--green); margin-bottom: 10px; padding: 12px 20px; border-radius: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .score-val { font-size: 2rem; font-weight: 800; width: 60px; text-align: center; }
+        .score-btn { width: 35px; height: 35px; border-radius: 50%; border: none; background: var(--white); cursor: pointer; font-size: 18px; }
+
+        /* 計時器預設值 */
+        .time-display { font-size: 5rem; font-weight: bold; color: var(--accent); text-align: center; margin: 20px 0; }
+        .time-presets { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+        .time-presets button { background: var(--blue); border: none; padding: 8px 15px; border-radius: 12px; cursor: pointer; font-weight: bold; }
+
+        /* 即時投票 */
+        .vote-card { background: var(--blue); padding: 20px; border-radius: 25px; text-align: center; }
+        .vote-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
+        .vote-btn { padding: 15px; border-radius: 15px; border: 2px solid white; background: white; font-size: 1.2rem; cursor: pointer; }
+        .vote-btn:active { background: var(--pink); }
+        .vote-stats { margin-top: 15px; text-align: left; background: rgba(255,255,255,0.5); padding: 15px; border-radius: 15px; }
+
+        /* 測驗解析 */
+        .quiz-card { padding: 15px; border-radius: 20px; margin-bottom: 15px; transition: 0.3s; border: 2px solid transparent; }
+        .quiz-option { display: block; margin: 8px 0; padding: 10px; background: white; border-radius: 10px; cursor: pointer; }
+        .is-correct { background: var(--correct) !important; border-color: #4caf50; }
+        .is-wrong { background: var(--wrong) !important; border-color: #f44336; }
+        .analysis { margin-top: 10px; font-size: 0.9rem; color: #666; padding: 10px; background: rgba(255,255,255,0.7); border-radius: 8px; border-left: 4px solid var(--accent); }
+
+        .main-btn { width: 100%; padding: 15px; border: none; border-radius: 20px; background: var(--accent); color: white; font-size: 1.1rem; font-weight: bold; cursor: pointer; box-shadow: 0 5px 15px rgba(255,154,162,0.3); }
+    </style>
+</head>
+<body>
+
+<div id="p5-canvas-container"></div>
+
+<div id="app">
+    <p5-celebration :trigger="celebrationTrigger"></p5-celebration>
+    
+    <header>老師小幫手</header>
+    <nav>
+        <button @click="tool = 'picker'" :class="{active: tool === 'picker'}">抽籤</button>
+        <button @click="tool = 'score'" :class="{active: tool === 'score'}">計分</button>
+        <button @click="tool = 'timer'" :class="{active: tool === 'timer'}">計時</button>
+        <button @click="tool = 'vote'" :class="{active: tool === 'vote'}">互動</button>
+        <button @click="tool = 'quiz'" :class="{active: tool === 'quiz'}">測驗</button>
+    </nav>
+
+    <div class="content">
+        <div v-if="tool === 'picker'">
+            <h2>隨機抽籤 <span style="font-size: 0.8rem; color:#999;">剩餘: {{ nameList.length }} 人</span></h2>
+            <div class="picker-box">{{ pickedName || '準備中' }}</div>
+            <textarea v-model="nameInput" placeholder="一行一個名字..."></textarea>
+            <div style="text-align:center; margin-bottom:10px;">
+                <label><input type="checkbox" v-model="excludePicked"> 抽中後移除</label>
+            </div>
+            <button class="main-btn" @click="roll" :disabled="isRolling">開始抽籤</button>
+        </div>
+
+        <div v-if="tool === 'score'">
+            <h2>小組計分</h2>
+            <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+                <input v-model="newTeamName" placeholder="新組名" style="flex:1; padding:8px; border-radius:8px; border:1px solid #eee;" />
+                <button @click="addTeam()" style="padding:8px 12px; border-radius:8px; border:none; background:#ff9aa2; color:#fff; cursor:pointer;">新增組別</button>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <label><input type="checkbox" v-model="autoSort"> 即時排序（依分數）</label>
+                <div style="font-size:0.95rem; color:#666;">
+                    領先：<strong v-if="leader">{{ leader.name }}（{{ leader.score }}）</strong><span v-else>—</span>
+                </div>
+            </div>
+
+            <div v-for="team in (autoSort ? sortedTeams : teams)" :key="team.id" class="team-row">
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input v-model="team.name" style="background:transparent; border:none; font-weight:bold; font-size:1rem; width:120px;" />
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <button class="score-btn" @click="addScore(team, -1)">-1</button>
+                        <button class="score-btn" @click="addScore(team, 1)" style="color:#ff6b6b">+1</button>
+                        <button class="score-btn" @click="addScore(team, 5)" style="color:#ff3b3b">+5</button>
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <span class="score-val">{{ team.score }}</span>
+                    <button @click="removeTeam(team)" title="移除組別" style="border:none; background:#eee; border-radius:8px; padding:6px; cursor:pointer;">移除</button>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-top:12px;">
+                <button @click="resetScore" style="flex:1; background:none; border:none; color:#ccc; cursor:pointer;">重置分數</button>
+                <button @click="resetTeams" style="flex:1; background:#eee; border:none; border-radius:8px; cursor:pointer;">重置隊伍</button>
+            </div>
+        </div>
+
+        <div v-if="tool === 'timer'">
+            <h2>課堂計時</h2>
+            <div class="time-display">{{ formattedTime }}</div>
+            <div class="time-presets">
+                <button @click="setT(180)">3分鐘</button>
+                <button @click="setT(300)">5分鐘</button>
+                <button @click="setT(600)">10分鐘</button>
+                <button @click="setT(60)" style="background:#eee">1分</button>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <button class="main-btn" @click="toggleT" :style="{flex:1, background: isTRunning ? '#bbb' : ''}">
+                    {{ isTRunning ? '暫停' : '開始計時' }}
+                </button>
+                <button @click="resetTimer" style="width:110px; border:none; border-radius:12px; background:#eee; font-weight:bold; cursor:pointer;">
+                    重置
+                </button>
+            </div>
+        </div>
+
+        <div v-if="tool === 'vote'">
+            <h2>即時問答 / 投票</h2>
+            <div class="vote-card">
+                <p v-if="!voting">老師可發起現場口頭問答，請學生按鈕：</p>
+                <div class="vote-options">
+                    <button class="vote-btn" @click="castVote('A')">A</button>
+                    <button class="vote-btn" @click="castVote('B')">B</button>
+                    <button class="vote-btn" @click="castVote('C')">C</button>
+                    <button class="vote-btn" @click="castVote('D')">D</button>
+                </div>
+                <div class="vote-stats" v-if="hasVotes">
+                    <strong>當前統計：</strong>
+                    <div v-for="(count, key) in votes" :key="key">
+                        {{ key }}: {{ count }} 票 ({{ getVotePercent(count) }}%)
+                    </div>
+                    <button @click="resetVotes" style="margin-top:10px; width:100%; border:1px solid #ccc; background:white; border-radius:10px; padding:5px;">清空統計</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="tool === 'quiz'">
+            <h2>測驗回饋</h2>
+            <div v-if="!showResult">
+                <div v-for="(q, idx) in quiz" :key="idx" class="quiz-card" style="background: var(--yellow);">
+                    <p><strong>{{ idx + 1 }}. {{ q.text }}</strong></p>
+                    <div v-for="(opt, oIdx) in q.opts" class="quiz-option">
+                        <label><input type="radio" :value="oIdx" v-model="ans[idx]"> {{ opt }}</label>
+                    </div>
+                </div>
+                <button class="main-btn" @click="finishQuiz">提交並看解析</button>
+            </div>
+            <div v-else>
+                <div style="text-align:center; margin-bottom:20px;">
+                    <span style="font-size: 3rem; font-weight: 800; color: var(--accent);">{{ finalScore }} 分</span>
+                </div>
+                <div v-for="(q, idx) in quiz" :key="idx" class="quiz-card" 
+                     :class="ans[idx] === q.a ? 'is-correct' : 'is-wrong'">
+                    <p><strong>{{ idx + 1 }}. {{ q.text }}</strong></p>
+                    <div v-for="(opt, oIdx) in q.opts" style="margin:5px 0; font-size: 0.95rem;">
+                        <span v-if="oIdx === q.a">✅</span>
+                        <span v-else-if="oIdx === ans[idx]">❌</span>
+                        <span v-else>⚪</span>
+                        {{ opt }}
+                    </div>
+                    <div class="analysis">
+                        <strong>💡 解析：</strong> {{ q.analysis }}
+                    </div>
+                </div>
+                <button class="main-btn" @click="showResult = false; ans = []">重新挑戰</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp, ref, computed, watch, onMounted } = Vue;
+
+    // --- p5.js 元件 ---
+    const P5Celebration = {
+        props: ['trigger'],
+        setup(props) {
+            let p5Instance = null;
+            const sketch = (p) => {
+                let particles = [];
+                p.setup = () => { let canvas = p.createCanvas(p.windowWidth, p.windowHeight); canvas.parent('p5-canvas-container'); };
+                p.draw = () => { p.clear(); for (let i = particles.length - 1; i >= 0; i--) { 
+                    particles[i].update(); particles[i].display(); 
+                    if (particles[i].life <= 0) particles.splice(i, 1); 
+                }};
+                p.trigger = () => { for (let i = 0; i < 60; i++) particles.push(new Particle(p)); };
+            };
+            class Particle {
+                constructor(p) {
+                    this.p = p; this.pos = p.createVector(p.width / 2, p.height * 0.8);
+                    this.vel = p.createVector(p.random(-7, 7), p.random(-12, -22));
+                    this.acc = p.createVector(0, 0.6); this.life = 255;
+                    this.c = p.color(p.random(['#ff9aa2', '#b5ead7', '#c7ceea', '#ffdac1']));
+                }
+                update() { this.vel.add(this.acc); this.pos.add(this.vel); this.life -= 4; }
+                display() { this.p.noStroke(); this.p.fill(this.c.levels[0], this.c.levels[1], this.c.levels[2], this.life); this.p.ellipse(this.pos.x, this.pos.y, 10); }
+            }
+            onMounted(() => p5Instance = new p5(sketch));
+            watch(() => props.trigger, () => { if (p5Instance && props.trigger > 0) p5Instance.trigger(); });
+            return () => null;
+        }
+    };
+
+    createApp({
+        components: { P5Celebration },
+        setup() {
+            const tool = ref('picker');
+            const celebrationTrigger = ref(0);
+
+            // 魔法棒效果
+            onMounted(() => {
+                document.body.addEventListener('mousemove', (e) => {
+                    const s = document.createElement('div'); s.className = 'sparkle';
+                    s.style.left = e.clientX + 'px'; s.style.top = e.clientY + 'px';
+                    const tx = (Math.random() - 0.5) * 100 + 'px', ty = (Math.random() - 0.5) * 100 + 'px';
+                    s.style.setProperty('--tx', tx); s.style.setProperty('--ty', ty);
+                    s.style.animation = `sparkle-fly 0.7s ease-out forwards`;
+                    document.body.appendChild(s); setTimeout(() => s.remove(), 700);
+                });
+            });
+
+            // 抽籤 (新增邏輯)
+            const nameInput = ref("王小明\n李大華\n張曉芳\n陳國平\n趙子強");
+            const pickedName = ref("");
+            const isRolling = ref(false);
+            const excludePicked = ref(true);
+            const nameList = computed(() => nameInput.value.split('\n').filter(n => n.trim()));
+            const roll = () => {
+                const list = nameList.value;
+                if (!list.length) return alert("請輸入名單！");
+                isRolling.value = true;
+                let i = 0;
+                const itv = setInterval(() => {
+                    pickedName.value = list[Math.floor(Math.random() * list.length)];
+                    if (++i > 15) {
+                        clearInterval(itv); isRolling.value = false;
+                        if (excludePicked.value) nameInput.value = list.filter(n => n !== pickedName.value).join('\n');
+                    }
+                }, 60);
+            };
+
+            // 計分
+            const teams = ref([
+                { id: 1, name: '第一組', score: 0 },
+                { id: 2, name: '第二組', score: 0 },
+                { id: 3, name: '第三組', score: 0 }
+            ]);
+            const nextTeamId = ref(4);
+            const newTeamName = ref('');
+            const autoSort = ref(true);
+
+            const addTeam = (name = '') => {
+                const n = (name || newTeamName.value || `第${nextTeamId.value}組`).trim();
+                if (!n) return;
+                teams.value.push({ id: nextTeamId.value++, name: n, score: 0 });
+                newTeamName.value = '';
+            };
+            const removeTeam = (t) => {
+                if (teams.value.length <= 1) return;
+                teams.value = teams.value.filter(x => x.id !== t.id);
+            };
+
+            const addScore = (t, delta = 1) => {
+                t.score = Math.max(0, (t.score || 0) + delta);
+                if (delta > 0) celebrationTrigger.value++;
+            };
+            const resetScore = () => teams.value.forEach(t => t.score = 0);
+            const resetTeams = () => {
+                teams.value = [
+                    { id: 1, name: '第一組', score: 0 },
+                    { id: 2, name: '第二組', score: 0 },
+                    { id: 3, name: '第三組', score: 0 }
+                ];
+                nextTeamId.value = 4;
+            };
+
+            const sortedTeams = computed(() => {
+                return [...teams.value].sort((a, b) => b.score - a.score || a.id - b.id);
+            });
+            const leader = computed(() => {
+                const s = sortedTeams.value;
+                return s && s.length ? s[0] : null;
+            });
+
+            // 計時 (預設 3, 5, 10)
+            const timeLeft = ref(180);
+            const defaultTime = ref(180); // 新增：記住目前預設/選擇的時間
+            const isTRunning = ref(false);
+            let tId = null;
+            const formattedTime = computed(() => {
+                const m = Math.floor(timeLeft.value / 60), s = timeLeft.value % 60;
+                return `${m}:${s < 10 ? '0' + s : s}`;
+            });
+            const setT = (s) => { timeLeft.value = s; defaultTime.value = s; isTRunning.value = false; clearInterval(tId); };
+            const resetTimer = () => {
+                // 重置為目前的 defaultTime，並停止計時
+                timeLeft.value = defaultTime.value;
+                isTRunning.value = false;
+                clearInterval(tId);
+            };
+            const toggleT = () => {
+                isTRunning.value = !isTRunning.value;
+                if (isTRunning.value) {
+                    tId = setInterval(() => {
+                        if (timeLeft.value > 0) timeLeft.value--;
+                        else {
+                            clearInterval(tId);
+                            isTRunning.value = false;
+                            // 播放鈴聲並提示
+                            playBell();
+                            alert("時間到！");
+                        }
+                    }, 1000);
+                } else clearInterval(tId);
+            };
+
+            // 互動投票
+            const votes = ref({A:0, B:0, C:0, D:0});
+            const hasVotes = computed(() => Object.values(votes.value).some(v => v > 0));
+            const castVote = (type) => { votes.value[type]++; };
+            const resetVotes = () => votes.value = {A:0, B:0, C:0, D:0};
+            const getVotePercent = (count) => {
+                const total = Object.values(votes.value).reduce((a,b)=>a+b, 0);
+                return total === 0 ? 0 : Math.round((count/total)*100);
+            };
+
+            // --- audio: 初始化與播放函式（新增） ---
+            let audioCtx = null;
+            let masterGain = null;
+            const initAudio = () => {
+                if (audioCtx) return;
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                masterGain = audioCtx.createGain();
+                masterGain.gain.value = 0.12; // 全域音量
+                masterGain.connect(audioCtx.destination);
+            };
+
+            const playClick = (opts = {}) => {
+                if (!audioCtx) return;
+                const o = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                o.type = opts.type || 'square';
+                o.frequency.value = opts.freq || 800;
+                g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.7, audioCtx.currentTime + 0.01);
+                g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.08);
+                o.connect(g); g.connect(masterGain);
+                o.start(); o.stop(audioCtx.currentTime + 0.09);
+            };
+
+            const playBell = () => {
+                if (!audioCtx) return;
+                const now = audioCtx.currentTime;
+                const g = audioCtx.createGain();
+                g.gain.setValueAtTime(0.0001, now);
+                g.gain.exponentialRampToValueAtTime(1.0, now + 0.01);
+                g.gain.exponentialRampToValueAtTime(0.0001, now + 2.5);
+                g.connect(masterGain);
+
+                // 幾個不同頻率的聲音疊加營造鐘聲
+                [880, 660, 1100].forEach((f, i) => {
+                    const o = audioCtx.createOscillator();
+                    o.type = 'sine';
+                    o.frequency.value = f;
+                    const detune = (Math.random() - 0.5) * 10;
+                    o.detune.value = detune;
+                    o.connect(g);
+                    o.start(now);
+                    o.stop(now + 2.2 - i * 0.2);
+                });
+            };
+
+            // 在使用者第一次互動時啟用 audio（避免被瀏覽器阻擋）
+            onMounted(() => {
+                document.body.addEventListener('pointerdown', initAudio, { once: true });
+                // 全域按鈕按下播放按鍵音
+                document.body.addEventListener('click', (e) => {
+                    if (!audioCtx) return; // 尚未啟用則略過
+                    if (e.target.closest && e.target.closest('button')) playClick();
+                });
+            });
+
+            // 測驗 (含解析)
+            const quiz = [
+                { 
+                    text: "在語意化 HTML 中，哪個標籤通常用來包裹頁面主導航？",
+                    opts: ["<main>", "<nav>", "<section>"],
+                    a: 1,
+                    analysis: "<nav> 用於包裹頁面或區塊的導覽連結；<main> 是主要內容容器，<section> 表示章節。"
+                },
+                {
+                    text: "下列哪種 CSS 選擇器具有最高的 specificity（優先權）？",
+                    opts: [".class", "#id", "div > p"],
+                    a: 1,
+                    analysis: "ID 選擇器（#id）優先於類別選擇器與元素選擇器；因此具有最高優先權。"
+                },
+                {
+                    text: "在 JavaScript 中，哪一項最描述 microtask（例如 Promise.then）與 macrotask（例如 setTimeout）的差異？",
+                    opts: ["microtask 在同一輪事件循環中比 macrotask 先執行", "macrotask 永遠先於 microtask 執行", "兩者執行順序完全隨機"],
+                    a: 0,
+                    analysis: "microtask（Promise.then 等）會在當前任務完成後、下一個 macrotask 前執行，因此優先於 macrotask。"
+                },
+                {
+                    text: "使用 p5.js 建立畫布時，哪個函式用來設定畫布大小？",
+                    opts: ["createCanvas()", "draw()", "setup()"],
+                    a: 0,
+                    analysis: "createCanvas(width, height) 在 setup() 中呼叫以建立畫布；setup() 與 draw() 是生命週期函式。"
+                },
+                {
+                    text: "在 Vue 3 Composition API 中，若要建立一個可響應的基本原始值（例如數字或字串），應使用哪個函式？",
+                    opts: ["reactive()", "ref()", "computed()"],
+                    a: 1,
+                    analysis: "ref() 用於包裝原始值成為響應式；reactive() 常用於物件，computed() 用於建立計算屬性。"
+                }
+            ];
+            const ans = ref([]);
+            const showResult = ref(false);
+            const finalScore = ref(0);
+            const finishQuiz = () => {
+                let s = 0;
+                quiz.forEach((q, i) => { if (ans.value[i] === q.a) s += Math.round(100/quiz.length); });
+                finalScore.value = s > 100 ? 100 : s;
+                showResult.value = true;
+                if (s >= 100) celebrationTrigger.value++;
+            };
+
+            return { 
+                tool, celebrationTrigger, nameInput, pickedName, isRolling, excludePicked, nameList, roll,
+                teams, newTeamName, autoSort, addTeam, removeTeam, addScore, resetScore, resetTeams, sortedTeams, leader,
+                timeLeft, formattedTime, isTRunning, setT, toggleT,
+                votes, hasVotes, castVote, resetVotes, getVotePercent,
+                quiz, ans, showResult, finalScore, finishQuiz
+             };
+        }
+    }).mount('#app');
+</script>
+
+</body>
+</html>
